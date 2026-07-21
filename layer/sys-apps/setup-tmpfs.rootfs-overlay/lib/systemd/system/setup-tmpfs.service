@@ -1,0 +1,14 @@
+[Unit]
+Description=setup-tmpfs
+DefaultDependencies=no
+After=-.mount run.mount
+Before=systemd-random-seed.service systemd-timesyncd.service systemd-logind.service systemd-update-utmp.service systemd-tmpfiles-setup.service systemd-rfkill.service rsyslog.service network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/lib/systemd/scripts/setup-tmpfs.sh
+TimeoutSec=30s
+
+[Install]
+WantedBy=sysinit.target

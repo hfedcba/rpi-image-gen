@@ -1,0 +1,29 @@
+# METABEGIN
+# X-Env-Layer-Name: hostname-from-mac
+# X-Env-Layer-Category: device
+# X-Env-Layer-Desc: Non-interactive replacement for the hostname-from-MAC
+#  step of pi-gen's dialog-based firstStart.sh wizard. Sets /etc/hostname
+#  and /etc/hosts from the first MAC address found, once, on first boot.
+# X-Env-Layer-Version: 1.0.0
+# X-Env-Layer-Provides: hostname-from-mac
+#
+# X-Env-VarPrefix: hostmac
+#
+# X-Env-Var-prefix: homegearpi
+# X-Env-Var-prefix-Desc: Hostname prefix. The final hostname is
+#  <prefix>-<mac-with-dashes>.
+# X-Env-Var-prefix-Required: n
+# X-Env-Var-prefix-Valid: string
+# X-Env-Var-prefix-Set: y
+# METAEND
+---
+mmdebstrap:
+  packages:
+    - iproute2
+  customize-hooks:
+    - |
+      set -eu
+      install -D -m 0644 /dev/stdin "$1/etc/default/rpi-hostname-from-mac" <<EOF
+      HOSTNAME_PREFIX=${IGconf_hostmac_prefix}
+      EOF
+    - $BDEBSTRAP_HOOKS/enable-units "$1" rpi-hostname-from-mac

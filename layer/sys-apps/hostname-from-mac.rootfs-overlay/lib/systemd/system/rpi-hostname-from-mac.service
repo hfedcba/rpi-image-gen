@@ -1,0 +1,15 @@
+[Unit]
+Description=Set hostname from MAC address (first boot)
+DefaultDependencies=no
+ConditionPathExists=!/etc/rpi-image-gen/hostname-from-mac.done
+After=local-fs.target systemd-udevd.service network-pre.target
+Before=network.target sysinit.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/systemd/scripts/rpi-hostname-from-mac.sh
+TimeoutSec=60
+
+[Install]
+WantedBy=sysinit.target

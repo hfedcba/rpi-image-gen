@@ -1,0 +1,43 @@
+# METABEGIN
+# X-Env-Layer-Name: data-partition
+# X-Env-Layer-Category: storage
+# X-Env-Layer-Desc: Non-interactive replacement for pi-gen's dialog-based
+#  setupPartitions.sh wizard. On first boot, grows the root partition and
+#  creates a BTRFS (dup profile, mirrored on a single device) data
+#  partition from the remaining disk space, mounted at /data. Includes a
+#  monthly btrfs scrub cron job. Requires MBR (works on any Pi, including
+#  models without GPT boot support).
+# X-Env-Layer-Version: 1.1.0
+# X-Env-Layer-Provides: data-partition
+#
+# X-Env-VarPrefix: datapart
+#
+# X-Env-Var-root_min_size: 6G
+# X-Env-Var-root_min_size-Desc: Minimum size the root partition is grown to
+#  on first boot.
+# X-Env-Var-root_min_size-Required: n
+# X-Env-Var-root_min_size-Valid: size
+# X-Env-Var-root_min_size-Set: y
+#
+# X-Env-Var-root_pct: 30
+# X-Env-Var-root_pct-Desc: Root is grown to this percentage of the physical
+#  disk size, or root_min_size, whichever is larger. Whatever remains is
+#  turned into the BTRFS /data partition.
+# X-Env-Var-root_pct-Required: n
+# X-Env-Var-root_pct-Valid: int:1-100
+# X-Env-Var-root_pct-Set: y
+# METAEND
+---
+mmdebstrap:
+  packages:
+    - btrfs-progs
+    - e2fsprogs
+    - parted
+  customize-hooks:
+    - |
+      set -eu
+      install -D -m 0644 /dev/stdin "$1/etc/default/rpi-firstboot-partition" <<EOF
+      ROOT_TARGET_MIN=${IGconf_datapart_root_min_size}
+      ROOT_TARGET_PCT=${IGconf_datapart_root_pct}
+      EOF
+    - $BDEBSTRAP_HOOKS/enable-units "$1" rpi-firstboot-partition

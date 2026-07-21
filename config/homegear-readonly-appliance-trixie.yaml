@@ -1,0 +1,31 @@
+# Read-only Homegear appliance image, equivalent to the custom pi-gen
+# stage6 (read-only root + zram + BTRFS data partition) and stage7
+# (Homegear) this was ported from. Same base layer set as
+# readonly-appliance-trixie.yaml, plus the homegear-debian-trixie layer.
+# Targets Raspberry Pi 3 here; swap device.layer for pi4/pi5/cm4/cm5/zero2w
+# as needed. Pi 1/2 and the original (v1) Pi Zero have no device layer in
+# rpi-image-gen yet.
+#
+# Set a user1 password, otherwise the account stays locked and layer
+# readonly-root's forced password change on first login has nothing to
+# act on. Simplest: pass it on the build command line instead of putting
+# it in this file (see README below) -
+#   -- IGconf_device_user1pass='Some8Str0ng!Pass'
+# or uncomment device.user1pass here for local testing.
+
+device:
+  layer: rpi3
+  # user1pass: "Some8Str0ng!Pass"
+
+image:
+  layer: image-readonly-appliance
+  rootfs_type: ext4
+  name: homegear-appliance
+
+layer:
+  base: trixie-minbase
+  tmpfs: setup-tmpfs
+  data: data-partition
+  hostname: hostname-from-mac
+  readonly: readonly-root
+  homegear: homegear-debian-trixie

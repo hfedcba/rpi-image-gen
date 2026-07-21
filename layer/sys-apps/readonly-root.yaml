@@ -1,0 +1,84 @@
+# METABEGIN
+# X-Env-Layer-Name: readonly-root
+# X-Env-Layer-Category: storage
+# X-Env-Layer-Desc: Turns the system into a read-only appliance: disables
+#  services that write to the root filesystem or that are meaningless on
+#  read-only media, ships ro/rw helper scripts, minimises journald/logrotate
+#  writes, and points chrony/fake-hwclock/logrotate state at the persistent
+#  /data partition (see layer data-partition). Root mount options
+#  themselves (ro) are set at image level, not here.
+# X-Env-Layer-Version: 1.0.0
+# X-Env-Layer-Provides: readonly-root
+# X-Env-Layer-Requires: device-user-admin,fake-hwclock
+#
+# X-Env-VarPrefix: roroot
+#
+# X-Env-Var-files: ${DIRECTORY}/readonly-root/files
+# X-Env-Var-files-Desc: Directory holding filesystem assets installed to
+#  per-user home directories.
+# X-Env-Var-files-Required: n
+# X-Env-Var-files-Valid: dir
+# X-Env-Var-files-Set: force
+#
+# X-Env-Var-force_password_change: y
+# X-Env-Var-force_password_change-Desc: Force $IGconf_device_user1 to change
+#  their password on next login (console or SSH), via passwd -e. Only
+#  takes effect if a password was actually set for that user. Uses
+#  passwd -e (immediate expiry), not chage -d 0: the latter only forces a
+#  change once the account's password age exceeds PASS_MAX_DAYS, which
+#  defaults to 99999 on Debian, so on its own it would never trigger.
+# X-Env-Var-force_password_change-Required: n
+# X-Env-Var-force_password_change-Valid: bool
+# X-Env-Var-force_password_change-Set: y
+# METAEND
+---
+mmdebstrap:
+  packages:
+    - chrony
+    - jq
+  customize-hooks:
+    - |
+      set -eu
+      chroot "$1" sh -c '
+        systemctl disable serial-getty@ttyAMA0.service
+        systemctl disable serial-getty@serial0.service
+        systemctl disable serial-getty@ttyS0.service
+
+        systemctl disable logrotate.timer
+        systemctl mask logrotate.timer
+        systemctl disable apt-daily.timer
+        systemctl mask apt-daily.timer
+        systemctl disable apt-daily-upgrade.timer
+        systemctl mask apt-daily-upgrade.timer
+        systemctl disable dphys-swapfile 2>/dev/null || true
+        systemctl mask dphys-swapfile 2>/dev/null || true
+        systemctl disable resize2fs_once 2>/dev/null || true
+        systemctl mask resize2fs_once 2>/dev/null || true
+        systemctl disable console-setup 2>/dev/null || true
+        systemctl mask console-setup 2>/dev/null || true
+      '
+    # debian-fixup: /etc/mtab must point at /proc/mounts, not be a real file,
+    # or writes to it fail once / is read-only.
+    - chroot "$1" ln -sf /proc/mounts /etc/mtab
+    - sed -i "s/#SystemMaxUse=/SystemMaxUse=1M/g" "$1/etc/systemd/journald.conf"
+    - sed -i "s/#RuntimeMaxUse=/RuntimeMaxUse=1M/g" "$1/etc/systemd/journald.conf"
+    - sed -i '/^After=/ s/$/ setup-tmpfs.service/' "$1/lib/systemd/system/cron.service"
+    - |
+      set -eu
+      mkdir -p "$1/etc/default"
+      if ! grep -q '^FILE=/data/fake-hwclock.data' "$1/etc/default/fake-hwclock" 2>/dev/null; then
+        echo "FILE=/data/fake-hwclock.data" >> "$1/etc/default/fake-hwclock"
+      fi
+    - |
+      set -eu
+      install -D -m 0644 "${IGconf_roroot_files}/bash_profile" \
+        "$1/home/${IGconf_device_user1}/.bash_profile"
+      chroot "$1" chown "${IGconf_device_user1}:${IGconf_device_user1}" \
+        "/home/${IGconf_device_user1}/.bash_profile"
+    - |-
+      set -eu
+      if igconf isy roroot_force_password_change; then
+        if chroot "$1" sh -c "passwd -S \"$IGconf_device_user1\" 2>/dev/null | awk '{print \$2}'" | grep -qE '^P$'; then
+          chroot "$1" passwd -e "$IGconf_device_user1"
+        fi
+      fi

@@ -1,0 +1,15 @@
+[Unit]
+Description=Install and configure Homegear (first boot)
+ConditionPathExists=!/etc/rpi-image-gen/homegear-install.done
+RequiresMountsFor=/data
+After=data.mount network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/systemd/scripts/rpi-firstboot-homegear.sh
+TimeoutSec=1800
+
+[Install]
+WantedBy=multi-user.target

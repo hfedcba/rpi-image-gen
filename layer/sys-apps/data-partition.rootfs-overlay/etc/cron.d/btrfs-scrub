@@ -1,0 +1,6 @@
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+# Run BTRFS scrub on data partition once per month to verify
+# checksums.
+
+12 3 1 * * root btrfs scrub start /data

@@ -1,0 +1,36 @@
+# METABEGIN
+# X-Env-Layer-Name: setup-tmpfs
+# X-Env-Layer-Category: storage
+# X-Env-Layer-Desc: zram-backed /var/log and /tmp for appliance-style images
+#  with a read-only root. Redirects /var/spool, /var/lib/dhcpcd5, /var/lock
+#  and /var/lib/systemd onto the zram-backed /tmp via symlinks so nothing
+#  writes to the (read-only) root filesystem at runtime.
+# X-Env-Layer-Version: 1.0.0
+# X-Env-Layer-Provides: setup-tmpfs
+# X-Env-Layer-Requires: fake-hwclock
+# METAEND
+---
+mmdebstrap:
+  packages:
+    - e2fsprogs
+  customize-hooks:
+    - |
+      set -eu
+      chroot "$1" sh -c '
+        rm -Rf /var/tmp
+        ln -s /tmp /var/tmp
+
+        rm -Rf /var/spool
+        mkdir -p /var/tmp/spool
+        ln -s /var/tmp/spool /var/spool
+
+        rm -Rf /var/lib/dhcpcd5
+        ln -s /var/tmp/dhcpcd5 /var/lib/dhcpcd5
+
+        rm -Rf /var/lock
+        ln -s /var/tmp/lock /var/lock
+
+        rm -Rf /var/lib/systemd
+        ln -s /var/tmp/systemd /var/lib/systemd
+      '
+    - $BDEBSTRAP_HOOKS/enable-units "$1" setup-tmpfs

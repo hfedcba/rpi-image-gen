@@ -1,0 +1,5 @@
+X-IG-Signed-By: /usr/share/keyrings/homegear-archive-keyring.gpg
+Types: deb
+URIs: https://apt.homegear.eu/debian/trixie/homegear/stable
+Suites: trixie
+Components: main

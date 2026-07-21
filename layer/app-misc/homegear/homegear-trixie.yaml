@@ -1,0 +1,49 @@
+# METABEGIN
+# X-Env-Layer-Name: homegear-debian-trixie
+# X-Env-Layer-Category: home-automation
+# X-Env-Layer-Desc: Homegear home-automation platform for Debian Trixie,
+#  ported from a custom pi-gen stage7. Registers the apt.homegear.eu repo
+#  and creates the homegear system user at build time; the (large) package
+#  set is installed on first boot, once /data is mounted, matching
+#  Homegear's own postinst behaviour of detecting a pre-existing
+#  /data/homegear-data directory. Database, logs and temp files are kept
+#  on a zram-backed /var/lib/homegear/db (via layer setup-tmpfs's
+#  extra-device mechanism); persistent config/state lives on /data (see
+#  layer data-partition).
+#
+#  CAVEAT: apt.homegear.eu may not (yet) publish a trixie suite - verify
+#  https://apt.homegear.eu/debian/trixie/homegear/stable/ resolves before
+#  building. If not, point Suites: in
+#  templates/debian/apt/homegear-trixie.sources at bookworm as an interim
+#  measure; Homegear's own .debs are typically suite-agnostic.
+# X-Env-Layer-Version: 1.0.0
+# X-Env-Layer-Requires: setup-tmpfs,data-partition
+#
+# X-Env-VarRequires: IGconf_sys_apt_keydir
+# X-Env-VarRequires-Valid: string
+# METAEND
+---
+mmdebstrap:
+  architectures:
+    - arm64
+  mirrors:
+    - ${IGTOP}/templates/debian/apt/homegear-trixie.sources
+  setup-hooks:
+    - mkdir -p $1/usr/share/keyrings/
+    - curl -fsSL https://apt.homegear.eu/Release.key | gpg --dearmor -o $1/usr/share/keyrings/homegear-archive-keyring.gpg
+    - chmod a+r $1/usr/share/keyrings/homegear-archive-keyring.gpg
+    - cp -p $1/usr/share/keyrings/homegear-archive-keyring.gpg $IGconf_sys_apt_keydir
+  customize-hooks:
+    - |
+      set -eu
+      chroot "$1" sh -c '
+        if ! id -u homegear >/dev/null 2>&1; then
+          adduser --system --no-create-home --shell /bin/false --group homegear
+        fi
+        usermod -a -G dialout homegear 2>/dev/null || true
+        usermod -a -G gpio homegear 2>/dev/null || true
+        usermod -a -G spi homegear 2>/dev/null || true
+      '
+    - mkdir -p "$1/var/lib/homegear/db"
+    - chroot "$1" chown -R homegear:homegear /var/lib/homegear
+    - $BDEBSTRAP_HOOKS/enable-units "$1" rpi-firstboot-homegear
