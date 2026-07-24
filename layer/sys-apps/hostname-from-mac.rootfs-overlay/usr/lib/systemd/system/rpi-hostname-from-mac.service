@@ -2,7 +2,8 @@
 Description=Set hostname from MAC address (first boot)
 DefaultDependencies=no
 ConditionPathExists=!/etc/rpi-image-gen/hostname-from-mac.done
-After=local-fs.target systemd-udevd.service network-pre.target
+After=local-fs.target systemd-udevd.service network-pre.target rpi-firstboot-rw.service
+Requires=rpi-firstboot-rw.service
 Before=network.target sysinit.target
 
 [Service]

@@ -87,6 +87,18 @@ runhook() {
 }
 
 
+# rsync options shared by both overlay appliers.
+#
+# Dgo-w: git does not track directory permissions - a directory in an
+# overlay is recreated at checkout time with whatever the cloning user's
+# umask produces, typically 0775 under the common umask 002. Without this,
+# -p propagates that onto the *destination* directories the overlay
+# traverses, so shipping a single file as etc/foo/bar.conf silently leaves
+# /etc and /etc/foo group-writable in the image. File modes are left alone:
+# unlike directories, those are deliberate (and git does track the x bit).
+declare -a OVERLAY_RSYNC_OPTS=(-a --chmod=Dgo-w)
+
+
 # Apply overlays
 apply_overlays() {
    local phase=$1 dest=$2
@@ -96,7 +108,7 @@ apply_overlays() {
    for spec in ${FS_OVERLAYS[$phase]}; do
       if src=$(map_path "$spec") && [[ -d $src ]]; then
          msg "runner: overlay [$src -> $dest]"
-         rsync -a -- "$src"/ "$dest"/
+         rsync "${OVERLAY_RSYNC_OPTS[@]}" -- "$src"/ "$dest"/
          local rc=$?
          [[ $rc -eq 0 ]] || die "runner: error applying overlay ($rc)"
       fi
@@ -200,7 +212,7 @@ apply_layer_overlays() {
       overlay="${static%.yaml}.rootfs-overlay"
       if [[ -d $overlay ]]; then
          msg "runner: layer overlay ($layer) [$overlay -> $dest]"
-         rsync -a -- "$overlay"/ "$dest"/
+         rsync "${OVERLAY_RSYNC_OPTS[@]}" -- "$overlay"/ "$dest"/
          local rc=$?
          [[ $rc -eq 0 ]] || die "runner: error applying layer overlay for $layer ($rc)"
       fi

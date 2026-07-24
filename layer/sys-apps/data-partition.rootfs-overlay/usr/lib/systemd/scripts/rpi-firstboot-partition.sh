@@ -7,7 +7,10 @@
 # cannot safely re-read the partition table entry of the currently mounted
 # root partition, so growing root requires a reboot before resize2fs can
 # see the new size. Appending the data partition afterwards does not
-# disturb root and can be done live.
+# disturb root and can be done live. Root is kept read-write across the
+# whole sequence by layer firstboot-assistant's rpi-firstboot-rw.service,
+# which runs before this unit on every boot until first boot is fully
+# done; this script does not remount rw/ro itself.
 
 set -eu
 
@@ -59,12 +62,15 @@ partdev() {
 	return 1
 }
 
-ROOT_DEV="$(findmnt -no SOURCE /)"
+# findmnt reports the SOURCE exactly as given to mount(2) - on this image
+# that's the "by-slot" symlink (/dev/disk/by-slot/system) from cmdline.txt,
+# not the real block device. lsblk happens to resolve symlinks itself, but
+# basename() and /sys/class/block/ need the canonical device name, so
+# resolve it once up front.
+ROOT_DEV="$(readlink -f "$(findmnt -no SOURCE /)")"
 ROOT_NAME="$(basename "$ROOT_DEV")"
 DISK="/dev/$(lsblk -no PKNAME "$ROOT_DEV")"
 ROOT_PART_NUM="$(cat "/sys/class/block/$ROOT_NAME/partition")"
-
-mount -o remount,rw /
 
 case "$state" in
 pending)
@@ -88,7 +94,6 @@ pending)
 	echo ", ${TARGET_MIB}MiB" | sfdisk --no-reread -N "$ROOT_PART_NUM" "$DISK"
 	echo "stage2" > "$STATE_FILE"
 	sync
-	mount -o remount,ro / || true
 	log "rebooting to apply root partition resize"
 	systemctl reboot
 	;;
@@ -98,15 +103,26 @@ stage2)
 
 	DATA_PART_NUM=$((ROOT_PART_NUM + 1))
 	if ! DATA_NAME="$(partdev "$DISK" "$DATA_PART_NUM")"; then
-		free_m="$(sfdisk -F "$DISK" 2>/dev/null | awk '/Unpartitioned space/ {print int($3)}' | tail -1)"
-		if [ -z "${free_m:-}" ] || [ "$free_m" -lt "$DATA_MIN_FREE_M" ]; then
+		# "Unpartitioned space /dev/X: 8.78 GiB, 9429319680 bytes, ... sectors"
+		# - field 3 is "/dev/X:", not a size; pull the raw byte count by its
+		# "bytes," neighbour instead of a fixed field position.
+		free_bytes="$(sfdisk -F "$DISK" 2>/dev/null | awk '/^Unpartitioned space/ {for (i = 1; i <= NF; i++) if ($i == "bytes,") print $(i - 1)}' | tail -1)"
+		free_m=$(( ${free_bytes:-0} / 1024 / 1024 ))
+		if [ "$free_m" -lt "$DATA_MIN_FREE_M" ]; then
 			log "not enough free space for a data partition ($DISK); skipping"
 			echo "done" > "$STATE_FILE"
 			touch "$DONE_FILE"
-			mount -o remount,ro / || true
 			exit 0
 		fi
-		echo ", +" | sfdisk --no-reread --append "$DISK"
+		# sfdisk --append with no explicit start= places the new
+		# partition in the FIRST free gap by sector order - on this
+		# disk layout that's the few-MiB alignment gap before
+		# partition 1 (genimage's align=8M), not the large gap after
+		# root. Pin the start explicitly to right after root ends.
+		root_start="$(cat "/sys/class/block/$ROOT_NAME/start")"
+		root_sectors="$(cat "/sys/class/block/$ROOT_NAME/size")"
+		data_start=$((root_start + root_sectors))
+		printf 'start=%d, size=+\n' "$data_start" | sfdisk --no-reread --append "$DISK"
 		partprobe "$DISK" || true
 		udevadm settle
 		DATA_NAME="$(partdev "$DISK" "$DATA_PART_NUM")"
@@ -124,7 +140,6 @@ stage2)
 
 	echo "done" > "$STATE_FILE"
 	touch "$DONE_FILE"
-	mount -o remount,ro / || true
 	log "data partition ready on $DATA_DEV"
 	;;
 *)

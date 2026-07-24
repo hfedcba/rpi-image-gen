@@ -1,0 +1,16 @@
+[Unit]
+Description=Finalize first boot: persist account database to /data, lock root read-only
+DefaultDependencies=no
+ConditionPathExists=!/etc/rpi-image-gen/firstboot.done
+After=rpi-firstboot-rw.service rpi-firstboot-partition.service rpi-hostname-from-mac.service rpi-firstboot-homegear.service local-fs.target
+Requires=rpi-firstboot-rw.service
+Wants=rpi-firstboot-partition.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/systemd/scripts/rpi-firstboot-finalize.sh
+TimeoutSec=60
+
+[Install]
+WantedBy=multi-user.target

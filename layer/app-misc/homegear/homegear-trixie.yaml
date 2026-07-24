@@ -4,10 +4,19 @@
 # X-Env-Layer-Desc: Homegear home-automation platform for Debian Trixie,
 #  ported from a custom pi-gen stage7. Registers the apt.homegear.eu repo
 #  and creates the homegear system user at build time; the (large) package
-#  set is installed on first boot, once /data is mounted, matching
-#  Homegear's own postinst behaviour of detecting a pre-existing
-#  /data/homegear-data directory. Database, logs and temp files are kept
-#  on a zram-backed /var/lib/homegear/db (via layer setup-tmpfs's
+#  set is installed interactively at the first login (console or SSH),
+#  once /data is mounted, matching Homegear's own postinst behaviour of
+#  detecting a pre-existing /data/homegear-data directory - and matching
+#  pi-gen, which likewise ran its install from a login shell behind a
+#  dialog progress box. The install cannot be started twice: the login
+#  front end (/usr/sbin/homegear-firstboot) only ever starts
+#  rpi-firstboot-homegear.service, and a concurrent login attaches to
+#  that unit's progress instead of starting a second apt-get. Note the
+#  consequence: an image that is never logged into never installs
+#  Homegear (and, since layer firstboot-assistant waits for it, never
+#  finalizes first boot either).
+#  Database, logs and temp files are kept on a zram-backed
+#  /var/lib/homegear/db (via layer setup-tmpfs's
 #  extra-device mechanism); persistent config/state lives on /data (see
 #  layer data-partition).
 #
@@ -16,7 +25,7 @@
 #  building. If not, point Suites: in
 #  templates/debian/apt/homegear-trixie.sources at bookworm as an interim
 #  measure; Homegear's own .debs are typically suite-agnostic.
-# X-Env-Layer-Version: 1.0.0
+# X-Env-Layer-Version: 1.2.0
 # X-Env-Layer-Requires: setup-tmpfs,data-partition
 #
 # X-Env-VarRequires: IGconf_sys_apt_keydir
@@ -26,6 +35,9 @@
 mmdebstrap:
   architectures:
     - arm64
+  packages:
+    # Progress boxes for the interactive first-boot install, as in pi-gen.
+    - dialog
   mirrors:
     - ${IGTOP}/templates/debian/apt/homegear-trixie.sources
   setup-hooks:
@@ -46,4 +58,7 @@ mmdebstrap:
       '
     - mkdir -p "$1/var/lib/homegear/db"
     - chroot "$1" chown -R homegear:homegear /var/lib/homegear
-    - $BDEBSTRAP_HOOKS/enable-units "$1" rpi-firstboot-homegear
+    # No enable-units for rpi-firstboot-homegear here, unlike the other
+    # first-boot units in this image: it has no [Install] section on
+    # purpose and is started on demand at login, not at boot. See the
+    # unit file.

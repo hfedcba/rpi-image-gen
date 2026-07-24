@@ -5,7 +5,7 @@
 #  with a read-only root. Redirects /var/spool, /var/lib/dhcpcd5, /var/lock
 #  and /var/lib/systemd onto the zram-backed /tmp via symlinks so nothing
 #  writes to the (read-only) root filesystem at runtime.
-# X-Env-Layer-Version: 1.0.0
+# X-Env-Layer-Version: 1.1.0
 # X-Env-Layer-Provides: setup-tmpfs
 # X-Env-Layer-Requires: fake-hwclock
 # METAEND
@@ -13,7 +13,22 @@
 mmdebstrap:
   packages:
     - e2fsprogs
-  customize-hooks:
+  cleanup-hooks:
+    # enable-units here, not in customize-hooks: bdebstrap runs every
+    # layer's YAML customize-hooks BEFORE its own appended overlay-copy
+    # hook (see bin/runner's apply_layer_overlays comment), so at
+    # customize-hooks time this layer's own rootfs-overlay - including
+    # setup-tmpfs.service - doesn't exist on disk yet and enable-units
+    # would silently skip it. cleanup is a later, separate bdebstrap
+    # phase, by which point the whole customize phase (overlays
+    # included) has already finished.
+    - $BDEBSTRAP_HOOKS/enable-units "$1" setup-tmpfs
+    # Also runs after every layer's customize-hooks, so nothing else in
+    # the build - e.g. a package postinst or another layer's hook - can
+    # still be writing under /var/spool, /var/lib/dhcpcd5, /var/lock or
+    # /var/lib/systemd once these become symlinks. Doing this any
+    # earlier breaks such hooks (see layer chrony's timesync directory,
+    # for example).
     - |
       set -eu
       chroot "$1" sh -c '
@@ -33,4 +48,3 @@ mmdebstrap:
         rm -Rf /var/lib/systemd
         ln -s /var/tmp/systemd /var/lib/systemd
       '
-    - $BDEBSTRAP_HOOKS/enable-units "$1" setup-tmpfs

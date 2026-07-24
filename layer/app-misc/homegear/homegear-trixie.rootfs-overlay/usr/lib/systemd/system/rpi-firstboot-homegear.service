@@ -1,0 +1,31 @@
+[Unit]
+Description=Install and configure Homegear (first boot)
+ConditionPathExists=!/etc/rpi-image-gen/homegear-install.done
+RequiresMountsFor=/data
+After=data.mount rpi-firstboot-rw.service
+Requires=rpi-firstboot-rw.service
+
+# Deliberately NO Wants=/After=network-online.target. Nothing on this
+# image pulls that target in at boot, so gating on it here would start
+# systemd-networkd-wait-online for the very first time at login, when
+# this unit is started on demand - blocking the start job (and with it
+# the login progress box) for up to wait-online's timeout while it waits
+# for every managed link to become routable, even though the network is
+# obviously already up (the admin is logged in). The apt install still
+# needs the network, so /usr/sbin/homegear-firstboot checks connectivity
+# itself, cheaply, before starting this unit.
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/systemd/scripts/rpi-firstboot-homegear.sh
+TimeoutSec=1800
+
+# No [Install] section, and the layer deliberately does not enable this
+# unit: it is started on demand by /usr/sbin/homegear-firstboot at the
+# first interactive login, so the install is visible to whoever triggers
+# it (see that script, and etc/profile.d/zz-homegear-firstboot.sh).
+# Keeping the work in a unit rather than running it straight from the
+# login shell is what prevents a second login from starting a second,
+# concurrent apt-get: systemd only ever has one job per unit, so further
+# `systemctl start` calls just wait for the one already running.

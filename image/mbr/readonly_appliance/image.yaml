@@ -7,9 +7,10 @@
 #  and boot are read-only by default; combine with layers setup-tmpfs,
 #  data-partition, readonly-root for a full pi-gen-style read-only
 #  appliance image. Forked from image-rpios.
-# X-Env-Layer-Version: 1.0.0
+# X-Env-Layer-Version: 1.1.0
 # X-Env-Layer-Requires: image-base,rpi-storage-binder
 # X-Env-Layer-Provides: image
+# X-Env-Layer-AfterProvider: debian-base
 #
 # X-Env-VarPrefix: image
 #
@@ -52,3 +53,6 @@
 mmdebstrap:
   packages:
     - initramfs-tools
+    - dosfstools
+    - e2fsprogs
+    - btrfs-progs

@@ -6,10 +6,15 @@
 #  read-only media, ships ro/rw helper scripts, minimises journald/logrotate
 #  writes, and points chrony/fake-hwclock/logrotate state at the persistent
 #  /data partition (see layer data-partition). Root mount options
-#  themselves (ro) are set at image level, not here.
-# X-Env-Layer-Version: 1.0.0
+#  themselves (ro) are set at image level, not here. Requires layer chrony
+#  (NTS-capable time sync, matching the original pi-gen stage6 config) and
+#  therefore conflicts with anything requiring systemd-timesyncd, e.g. the
+#  suite layer trixie-minbase - use trixie-minbase's constituent layers
+#  directly instead, omitting systemd-timesyncd; see the example configs.
+# X-Env-Layer-Version: 1.2.0
 # X-Env-Layer-Provides: readonly-root
-# X-Env-Layer-Requires: device-user-admin,fake-hwclock
+# X-Env-Layer-Requires: device-user-admin,fake-hwclock,chrony,firstboot-assistant
+# X-Env-Layer-Conflicts: systemd-timesyncd
 #
 # X-Env-VarPrefix: roroot
 #
@@ -34,8 +39,9 @@
 ---
 mmdebstrap:
   packages:
-    - chrony
+    - cron
     - jq
+    - logrotate
   customize-hooks:
     - |
       set -eu
@@ -77,8 +83,14 @@ mmdebstrap:
         "/home/${IGconf_device_user1}/.bash_profile"
     - |-
       set -eu
+      required=n
       if igconf isy roroot_force_password_change; then
         if chroot "$1" sh -c "passwd -S \"$IGconf_device_user1\" 2>/dev/null | awk '{print \$2}'" | grep -qE '^P$'; then
           chroot "$1" passwd -e "$IGconf_device_user1"
+          required=y
         fi
       fi
+      install -D -m 0644 /dev/stdin "$1/etc/default/rpi-firstboot-finalize" <<EOF
+      PASSWORD_CHANGE_REQUIRED=${required}
+      PASSWORD_CHANGE_USER=${IGconf_device_user1}
+      EOF

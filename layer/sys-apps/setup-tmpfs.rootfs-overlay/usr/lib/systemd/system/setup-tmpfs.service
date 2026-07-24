@@ -7,7 +7,7 @@ Before=systemd-random-seed.service systemd-timesyncd.service systemd-logind.serv
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/lib/systemd/scripts/setup-tmpfs.sh
+ExecStart=/usr/lib/systemd/scripts/setup-tmpfs.sh
 TimeoutSec=30s
 
 [Install]

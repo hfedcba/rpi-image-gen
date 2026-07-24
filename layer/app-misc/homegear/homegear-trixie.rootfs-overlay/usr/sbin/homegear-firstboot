@@ -1,0 +1,193 @@
+#!/bin/bash
+#
+# Interactive front end for the first-boot Homegear installation,
+# restoring pi-gen's visible, dialog-driven install from
+# firstStartCustom.sh. Invoked from /etc/profile.d/zz-homegear-firstboot.sh
+# on interactive login (console or SSH) and re-runnable by hand at any
+# time.
+#
+# The installation itself is deliberately NOT performed here: it runs in
+# rpi-firstboot-homegear.service and this script only starts that unit
+# and renders its journal output. That indirection is what makes a double
+# installation impossible - systemd only ever has one job per unit, so a
+# second login (or a second run of this script) attaches to the install
+# already in progress instead of starting another apt-get alongside it.
+#
+# The unit guards the install; a flock (see below) additionally guards
+# this front end, so a second concurrent login doesn't put up its own
+# installer dialog - it either watches the running install or steps
+# aside, but never drives a second one.
+
+set -u
+
+UNIT=rpi-firstboot-homegear.service
+DONE_FILE=/etc/rpi-image-gen/homegear-install.done
+# On tmpfs, so it never touches the (first-boot-only writable) root fs
+# and is gone after a reboot - exactly the lifetime we want for a
+# "someone is installing right now" flag.
+LOCK_FILE=/run/homegear-firstboot.lock
+
+if [ "$(id -u)" -ne 0 ]; then
+	echo "homegear-firstboot: must be run as root (try: sudo homegear-firstboot)" >&2
+	exit 1
+fi
+
+# Nothing to do - and nothing to say, since this runs on every login
+# until the install has happened.
+[ -f "$DONE_FILE" ] && exit 0
+[ -f "/usr/lib/systemd/system/$UNIT" ] || exit 0
+
+# dialog needs a real terminal; fall back to plain output when there
+# isn't one (e.g. `ssh host sudo homegear-firstboot`).
+USE_DIALOG=1
+if ! command -v dialog > /dev/null 2>&1 ||
+	[ ! -t 0 ] || [ ! -t 1 ] ||
+	[ -z "${TERM:-}" ] || [ "$TERM" = dumb ]; then
+	USE_DIALOG=0
+fi
+
+# Must be sampled before stdin is replaced by a pipe further down.
+TTY_Y=24
+TTY_X=80
+if size=$(stty size 2> /dev/null); then
+	TTY_Y=${size%% *}
+	TTY_X=${size##* }
+fi
+TTY_Y=$((TTY_Y - 6))
+TTY_X=$((TTY_X - 6))
+[ "$TTY_Y" -lt 10 ] && TTY_Y=10
+[ "$TTY_X" -lt 40 ] && TTY_X=40
+
+# Message texts carry literal "\n" sequences: dialog expands those itself,
+# the plain-text fallback needs printf %b to do the same.
+msg() {
+	if [ "$USE_DIALOG" = 1 ]; then
+		dialog --title "$1" --msgbox "$2" 12 64
+	else
+		printf '\n%s\n' "$1"
+		printf '%b\n\n' "$2"
+	fi
+}
+
+# Yes/no prompt, defaulting to yes.
+ask() {
+	if [ "$USE_DIALOG" = 1 ]; then
+		dialog --title "$1" --yesno "$2" 12 64
+		return $?
+	fi
+	local answer
+	read -r -p "$(printf '%b [Y/n] ' "$2")" answer
+	case "${answer:-y}" in
+	[Nn]*) return 1 ;;
+	*) return 0 ;;
+	esac
+}
+
+# Cheap "is the network usable for apt?" check, standing in for the
+# network-online.target gate the install unit deliberately drops (see
+# that unit for why). A default route is enough of a proxy here - the
+# apt-get update inside the install is the real arbiter and its failure
+# is handled - and, unlike a DNS lookup, it can't itself hang. Skipped
+# (treated as OK) if `ip` somehow isn't present, so a missing tool never
+# blocks the install.
+have_network() {
+	command -v ip > /dev/null 2>&1 || return 0
+	[ -n "$(ip route show default 2> /dev/null)" ]
+}
+
+# Start the install and stream its journal to stdout, stopping the
+# follower once the (Type=oneshot) start job has returned.
+run_install() {
+	journalctl -b -f -o cat -u "$UNIT" --no-pager 2>/dev/null &
+	local jpid=$! rc=0
+	systemctl start "$UNIT" || rc=$?
+	sleep 1
+	kill "$jpid" 2> /dev/null
+	wait "$jpid" 2> /dev/null
+	return $rc
+}
+
+# Stream an install that ANOTHER session is driving, for a passive
+# observer. Same journal follow as run_install but without a
+# `systemctl start` of its own - it just tails until the unit stops
+# being active, so the watcher can't start, re-drive or reboot anything.
+follow_progress() {
+	journalctl -b -f -o cat -u "$UNIT" --no-pager 2>/dev/null &
+	local jpid=$!
+	while [ "$(systemctl show -P ActiveState "$UNIT" 2> /dev/null)" = activating ]; do
+		sleep 2
+	done
+	sleep 1
+	kill "$jpid" 2> /dev/null
+	wait "$jpid" 2> /dev/null
+}
+
+# Only one login session may DRIVE the installer. Whoever grabs this lock
+# is the driver and runs the flow below; a second, concurrent login fails
+# the non-blocking flock and becomes an observer instead of putting up its
+# own dialog. Fail open: if the lock file can't even be opened, don't wedge
+# the installer over it - just proceed unlocked.
+if exec 9> "$LOCK_FILE" 2> /dev/null && ! flock -n 9; then
+	# Someone else is already driving. Show their progress if the install
+	# is actually running; otherwise (they're still at the prompts) just
+	# point back to that session. Either way, never start a second one.
+	if [ "$(systemctl show -P ActiveState "$UNIT" 2> /dev/null)" = activating ]; then
+		if [ "$USE_DIALOG" = 1 ]; then
+			follow_progress | dialog --title "System setup" --progressbox "Installing Homegear (started in another session)..." "$TTY_Y" "$TTY_X"
+			clear
+		else
+			echo "Homegear is being installed by another session; showing its progress:"
+			follow_progress
+		fi
+		if [ -f "$DONE_FILE" ]; then
+			msg "Homegear" "Homegear was installed. You can reboot from the session that started the install, or run 'sudo reboot' when ready."
+		fi
+	else
+		msg "Homegear" "The Homegear installer is already open in another login session.\n\nPlease continue there - it won't be installed twice."
+	fi
+	exit 0
+fi
+
+if [ "$(systemctl show -P ActiveState "$UNIT" 2> /dev/null)" = activating ]; then
+	msg "Homegear" "A Homegear installation started by another session is still running.\n\nShowing its progress - this does not start a second installation."
+else
+	# Homegear's postinst picks up /data/homegear-data if it exists at
+	# install time, and everything persistent lands there afterwards, so
+	# installing before the data partition exists would produce a broken
+	# setup rather than merely an inconvenient one.
+	if ! mountpoint -q /data; then
+		msg "Homegear" "The /data partition is not available yet, so Homegear cannot be installed.\n\nReboot and log in again once first-boot partitioning has finished."
+		exit 1
+	fi
+	if ! have_network; then
+		msg "Homegear" "No network connection is available yet, so Homegear cannot be downloaded.\n\nConnect this device to the network, then run 'sudo homegear-firstboot' - or simply log in again."
+		exit 1
+	fi
+	if ! ask "Homegear" "Homegear is not installed on this system yet.\n\nInstall it now? This downloads several hundred megabytes and takes a while."; then
+		msg "Homegear" "Skipped.\n\nRun 'sudo homegear-firstboot' when you are ready, or simply log in again."
+		exit 0
+	fi
+fi
+
+rc=0
+if [ "$USE_DIALOG" = 1 ]; then
+	run_install | dialog --title "System setup" --progressbox "Installing Homegear..." "$TTY_Y" "$TTY_X"
+	rc=${PIPESTATUS[0]}
+else
+	run_install || rc=$?
+fi
+
+if [ -f "$DONE_FILE" ]; then
+	msg "Homegear" "Homegear was installed, configured and started successfully."
+	if ask "Setup finished" "Reboot now?\n\nThe remaining first-boot steps run on the next boot and switch the root filesystem back to read-only."; then
+		[ "$USE_DIALOG" = 1 ] && clear
+		systemctl reboot
+		exit 0
+	fi
+	msg "Homegear" "The root filesystem stays writeable until the next reboot."
+else
+	msg "Homegear" "The Homegear installation failed (status $rc).\n\nSee 'journalctl -u $UNIT' for details, then run 'sudo homegear-firstboot' to try again."
+fi
+
+[ "$USE_DIALOG" = 1 ] && clear
+exit 0

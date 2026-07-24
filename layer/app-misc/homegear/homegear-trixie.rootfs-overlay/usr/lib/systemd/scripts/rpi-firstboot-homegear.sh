@@ -1,11 +1,23 @@
 #!/bin/bash
 #
-# Non-interactive replacement for pi-gen's firstStartCustom.sh. Runs once,
-# after the /data partition (see layer data-partition) is mounted, since
-# Homegear's postinst script detects and uses /data/homegear-data if it
-# already exists at install time.
+# Port of pi-gen's firstStartCustom.sh. Runs once, after the /data
+# partition (see layer data-partition) is mounted, since Homegear's
+# postinst script detects and uses /data/homegear-data if it already
+# exists at install time. Root is kept read-write by layer
+# firstboot-assistant's rpi-firstboot-rw.service, which runs before this
+# unit on every boot until first boot is fully done; no remount here.
+#
+# This is only the backend: it is run by rpi-firstboot-homegear.service,
+# which is not enabled and is started on demand by
+# /usr/sbin/homegear-firstboot at the first interactive login. Everything
+# printed here ends up in the journal, where that script picks it up and
+# renders it in a dialog progress box - so keep the output informative.
 
 set -eu
+
+# apt must never try to open a dialog of its own here: its stdout is a
+# pipe into the journal, not a terminal.
+export DEBIAN_FRONTEND=noninteractive
 
 STATE_DIR=/etc/rpi-image-gen
 DONE_FILE="$STATE_DIR/homegear-install.done"
@@ -13,22 +25,33 @@ DONE_FILE="$STATE_DIR/homegear-install.done"
 [ -f "$DONE_FILE" ] && exit 0
 
 mkdir -p "$STATE_DIR"
-mount -o remount,rw / 2>/dev/null || true
 
 # Create Homegear data directory before installing Homegear so it can be
 # detected in Homegear's postinst script.
 mkdir -p /data/homegear-data
 chown homegear:homegear /data/homegear-data
 
-apt-get update
+# The progress box downstream shows whatever reaches stdout. apt is
+# quiet for long stretches even when it is working hard - contacting the
+# mirrors during `update`, then "Building dependency tree..." over this
+# large package set on a Pi - so announce each slow phase ourselves,
+# otherwise the box just says "Installing Homegear..." for a minute and
+# looks hung. stdbuf line-buffers apt's own output so its lines surface
+# as they happen instead of in 4 KB blocks (apt full-buffers stdout once
+# it is a pipe rather than a terminal).
+echo "==> Updating package lists (contacting mirrors)..."
+stdbuf -oL -eL apt-get update
 
-apt-get -y install \
+echo "==> Installing Homegear and add-ons - downloading several hundred MB, this takes a while..."
+stdbuf -oL -eL apt-get -y install \
 	homegear homegear-management homegear-webssh homegear-adminui \
 	homegear-nodes-core homegear-nodes-extra homegear-homematicbidcos \
 	homegear-homematicwired homegear-insteon homegear-max \
 	homegear-philipshue homegear-sonos homegear-kodi homegear-beckhoff \
 	homegear-knx homegear-enocean homegear-intertechno homegear-ccu \
-	homegear-nanoleaf || apt-get -y -f install
+	homegear-nanoleaf || stdbuf -oL -eL apt-get -y -f install
+
+echo "==> Configuring Homegear..."
 
 sed -i 's/debugLevel = 4/debugLevel = 3/g' /etc/homegear/main.conf
 sed -i 's/tempPath = \/var\/lib\/homegear\/tmp/tempPath = \/var\/tmp\/homegear/g' /etc/homegear/main.conf
@@ -64,9 +87,10 @@ sed -i 's/\/var\/lib\/homegear\/node-blue\/data\/node-red/\/data\/homegear-data\
 chown -R homegear:homegear /var/lib/homegear/www
 
 # Create database and defaultPassword.txt while file system is writeable
+echo "==> Starting Homegear for the first time..."
 systemctl restart homegear
 
 touch "$DONE_FILE"
-mount -o remount,ro / 2>/dev/null || true
+echo "==> Homegear installation complete."
 
 logger -t rpi-firstboot-homegear "Homegear installed and configured"

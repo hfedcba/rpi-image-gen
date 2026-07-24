@@ -2,7 +2,8 @@
 #
 # Non-interactive replacement for the hostname-from-MAC step that used to
 # be part of pi-gen's dialog-based firstStart.sh wizard. Runs once on
-# first boot.
+# first boot. Root is kept read-write by layer firstboot-assistant's
+# rpi-firstboot-rw.service, which runs before this unit; no remount here.
 
 set -eu
 
@@ -10,7 +11,7 @@ STATE_DIR=/etc/rpi-image-gen
 DONE_FILE="$STATE_DIR/hostname-from-mac.done"
 DEFAULTS_FILE=/etc/default/rpi-hostname-from-mac
 
-HOSTNAME_PREFIX=homegearpi
+HOSTNAME_PREFIX=pi
 # shellcheck disable=SC1090
 [ -f "$DEFAULTS_FILE" ] && . "$DEFAULTS_FILE"
 
@@ -22,10 +23,11 @@ if [ -z "$mac" ]; then
 	exit 0
 fi
 
-newhost="${HOSTNAME_PREFIX}-$(echo "$mac" | tr ':' '-')"
+# Only the last three octets go into the hostname - enough to tell devices
+# apart on a LAN, without the redundant OUI prefix every board shares.
+suffix="$(echo "$mac" | awk -F: '{print $(NF-2) "-" $(NF-1) "-" $NF}')"
+newhost="${HOSTNAME_PREFIX}-${suffix}"
 oldhost="$(cat /etc/hostname 2>/dev/null || echo raspberrypi)"
-
-mount -o remount,rw / 2>/dev/null || true
 
 echo "$newhost" > /etc/hostname
 hostnamectl set-hostname "$newhost" 2>/dev/null || hostname "$newhost" || true
@@ -37,6 +39,5 @@ elif ! grep -qE "^127\.0\.1\.1[[:space:]]+${newhost}([[:space:]]|\$)" /etc/hosts
 fi
 
 touch "$DONE_FILE"
-mount -o remount,ro / 2>/dev/null || true
 
 logger -t rpi-hostname-from-mac "hostname set to $newhost"

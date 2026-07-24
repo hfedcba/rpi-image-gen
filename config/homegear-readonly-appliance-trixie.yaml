@@ -6,26 +6,50 @@
 # as needed. Pi 1/2 and the original (v1) Pi Zero have no device layer in
 # rpi-image-gen yet.
 #
-# Set a user1 password, otherwise the account stays locked and layer
-# readonly-root's forced password change on first login has nothing to
-# act on. Simplest: pass it on the build command line instead of putting
-# it in this file (see README below) -
+# Default user1 password below is intentionally a known, shared value -
+# layer readonly-root forces a change on first login (console or SSH), so
+# it only ever needs to get someone in once. Override per build if you'd
+# rather not commit even a rotated-on-first-use password to git, e.g.:
 #   -- IGconf_device_user1pass='Some8Str0ng!Pass'
-# or uncomment device.user1pass here for local testing.
 
 device:
   layer: rpi3
-  # user1pass: "Some8Str0ng!Pass"
+  user1pass: "R@spb3rry"
 
 image:
   layer: image-readonly-appliance
   rootfs_type: ext4
   name: homegear-appliance
+  # image-readonly-appliance's own default (100%) tells genimage to size
+  # root exactly to fit its content, with zero bytes free. That leaves no
+  # room for layer data-partition's first-boot growth script to even
+  # write its own progress-tracking state file (let alone for the forced
+  # SSH password change to write /etc/shadow), deadlocking first boot
+  # before the partition ever gets grown. Every other config in this repo
+  # overrides this same default for the same reason - see e.g.
+  # config/trixie-minbase.yaml. Same story for boot_part_size: 56M of
+  # kernel+initramfs+firmware blobs with zero headroom would make any
+  # future kernel/initramfs update fail the same way. Fixed size here
+  # (rather than a percentage) since /boot/firmware doesn't grow itself
+  # like root does - this needs to be enough headroom up front.
+  root_part_size: 200%
+  boot_part_size: 256M
 
 layer:
-  base: trixie-minbase
-  tmpfs: setup-tmpfs
-  data: data-partition
-  hostname: hostname-from-mac
-  readonly: readonly-root
-  homegear: homegear-debian-trixie
+  # trixie-minbase's own layer set, minus systemd-timesyncd: readonly-root
+  # requires layer chrony instead (matches pi-gen stage6's chrony.conf),
+  # and chrony/systemd-timesyncd conflict - see readonly-root.yaml.
+  - debian-trixie-arm64-multi
+  - rpi-debian-trixie
+  - rpi-misc-utils
+  - rpi-essential-base
+  - rpi-misc-skel
+  - systemd-net-min
+  - openssh-server
+  - wireless-regulatory
+  - iwd
+  - setup-tmpfs
+  - data-partition
+  - hostname-from-mac
+  - readonly-root
+  - homegear-debian-trixie

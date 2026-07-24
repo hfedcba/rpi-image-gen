@@ -1,7 +1,11 @@
 # METABEGIN
 # X-Env-Layer-Name: openssh-server
 # X-Env-Layer-Desc: OpenSSH server daemon and local user SSH key setup.
-# X-Env-Layer-Version: 1.1.0
+#  The host keys openssh-server's postinst generates inside the build
+#  chroot are discarded, so every device gets its own on first boot
+#  instead of the whole batch sharing the build host's key - see
+#  regenerate_host_keys.
+# X-Env-Layer-Version: 1.2.0
 # X-Env-Layer-Requires: device-user-admin
 #
 # X-Env-VarPrefix: ssh
@@ -31,6 +35,26 @@
 # X-Env-Var-pubkey_only-Required: n
 # X-Env-Var-pubkey_only-Valid: bool
 # X-Env-Var-pubkey_only-Set: y
+#
+# X-Env-Var-regenerate_host_keys: y
+# X-Env-Var-regenerate_host_keys-Desc: Remove the SSH host keys that
+#  openssh-server's postinst generated inside the build chroot, so that
+#  each device generates its own on first boot rather than every image
+#  written from this build sharing one private key - which would make
+#  host key verification meaningless and any device trivially
+#  impersonatable by anyone holding the image.
+#  No extra unit is needed for the regeneration: Debian's openssh-server
+#  ships sshd-keygen.service (ConditionFirstBoot=yes, ExecStart=ssh-keygen
+#  -A), already enabled via ssh.service.wants, and ssh-keygen -A creates
+#  exactly the keys that are missing. It does need /etc to be writeable
+#  at that point, which is the case even on read-only appliance images -
+#  layer firstboot-assistant keeps root read-write for the whole of first
+#  boot. Set to n only if you deliberately want a fixed, image-wide host
+#  identity (e.g. a single-device build, or one where the keys are
+#  provisioned by other means).
+# X-Env-Var-regenerate_host_keys-Required: n
+# X-Env-Var-regenerate_host_keys-Valid: bool
+# X-Env-Var-regenerate_host_keys-Set: y
 # METAEND
 ---
 mmdebstrap:
@@ -59,6 +83,25 @@ mmdebstrap:
       UsePAM yes
       PubkeyAuthentication yes
       AuthenticationMethods publickey
+      EOCHROOT
+      fi
+    - |-
+      set -eu
+      if igconf isy ssh_regenerate_host_keys ; then
+         rm -f "$1"/etc/ssh/ssh_host_*_key "$1"/etc/ssh/ssh_host_*_key.pub
+         # Debian's sshd-keygen.service gates on ConditionFirstBoot, i.e.
+         # on /etc/machine-id still being empty. That holds for images
+         # built here, but it is the wrong condition to bet the SSH
+         # daemon on: if anything ever seeds machine-id at build time,
+         # the unit would silently skip and sshd would come up with no
+         # host keys at all - `sshd -t` fails, ssh.service never starts,
+         # and a headless device is simply unreachable. Key on the thing
+         # we actually care about instead.
+         mkdir -p "$1/etc/systemd/system/sshd-keygen.service.d"
+         cat <<- 'EOCHROOT' > "$1/etc/systemd/system/sshd-keygen.service.d/10-regenerate-if-missing.conf"
+      [Unit]
+      ConditionFirstBoot=
+      ConditionPathExists=!/etc/ssh/ssh_host_ed25519_key
       EOCHROOT
       fi
     - $BDEBSTRAP_HOOKS/enable-units "$1" ssh

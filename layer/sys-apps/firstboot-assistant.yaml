@@ -1,0 +1,30 @@
+# METABEGIN
+# X-Env-Layer-Name: firstboot-assistant
+# X-Env-Layer-Category: storage
+# X-Env-Layer-Desc: Non-interactive equivalent of pi-gen's firstStart.sh
+#  wizard for a read-only appliance image: keeps root read-write across
+#  every boot until first-boot bootstrapping (partitioning, hostname,
+#  optional Homegear install) has finished, since none of those steps -
+#  nor a forced password change over SSH - can write to a read-only root.
+#  Once everything else present on the image is done, locks root back to
+#  read-only. Layers that need a writable root during first boot
+#  (data-partition, hostname-from-mac, homegear) require this layer
+#  instead of managing their own rw/ro remounts.
+#
+#  The account database (/etc/passwd,shadow,group,gshadow) is deliberately
+#  kept on root, NOT moved to /data: /data mounts a second into boot,
+#  after early services (systemd-networkd/-resolved) do NSS user lookups,
+#  so a symlink to /data would dangle and fail them with status=217/USER.
+#  A password change after first boot therefore needs a manual 'rw' - the
+#  standard read-only-appliance trade-off. See rpi-firstboot-finalize.sh.
+# X-Env-Layer-Version: 1.2.0
+# X-Env-Layer-Provides: firstboot-assistant
+# METAEND
+---
+mmdebstrap:
+  cleanup-hooks:
+    # Not in customize-hooks: this layer's own rootfs-overlay (the two
+    # .service units) isn't applied yet at customize-hooks time - see
+    # setup-tmpfs.yaml for the full explanation.
+    - $BDEBSTRAP_HOOKS/enable-units "$1" rpi-firstboot-rw
+    - $BDEBSTRAP_HOOKS/enable-units "$1" rpi-firstboot-finalize

@@ -1,0 +1,15 @@
+[Unit]
+Description=Keep root read-write until first-boot bootstrap completes
+DefaultDependencies=no
+ConditionPathExists=!/etc/rpi-image-gen/firstboot.done
+After=local-fs.target
+Before=sysinit.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/systemd/scripts/rpi-firstboot-rw.sh
+TimeoutSec=30
+
+[Install]
+WantedBy=sysinit.target

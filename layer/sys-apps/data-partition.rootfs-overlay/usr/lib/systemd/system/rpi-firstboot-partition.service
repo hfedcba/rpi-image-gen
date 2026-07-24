@@ -2,7 +2,8 @@
 Description=Grow root partition and create BTRFS /data partition (first boot)
 DefaultDependencies=no
 ConditionPathExists=!/etc/rpi-image-gen/firstboot-partition.done
-After=local-fs.target systemd-udevd.service
+After=local-fs.target systemd-udevd.service rpi-firstboot-rw.service
+Requires=rpi-firstboot-rw.service
 Before=sysinit.target
 
 [Service]

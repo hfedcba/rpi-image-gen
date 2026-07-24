@@ -9,4 +9,12 @@ mmdebstrap:
     - fake-hwclock
   customize-hooks:
     - date -d "@${SOURCE_DATE_EPOCH}" > $1/etc/fake-hwclock.data
-    - $BDEBSTRAP_HOOKS/enable-units "$1" fake-hwclock
+    - |-
+      set -eu
+      # Debian's fake-hwclock package (0.14+, Trixie) masks the legacy
+      # fake-hwclock.service itself, replaced by self-enabling
+      # fake-hwclock-load.service/-save.service/-save.timer. Only try to
+      # enable it where it isn't masked (e.g. older releases).
+      if [ "$(readlink -f "$1/usr/lib/systemd/system/fake-hwclock.service" 2>/dev/null)" != "/dev/null" ]; then
+        $BDEBSTRAP_HOOKS/enable-units "$1" fake-hwclock
+      fi
