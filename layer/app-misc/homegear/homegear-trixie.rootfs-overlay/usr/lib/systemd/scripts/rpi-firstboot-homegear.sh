@@ -86,11 +86,20 @@ sed -i 's/\/var\/lib\/homegear\/node-blue\/data\/node-red/\/data\/homegear-data\
 
 chown -R homegear:homegear /var/lib/homegear/www
 
-# Create database and defaultPassword.txt while file system is writeable
-echo "==> Starting Homegear for the first time..."
-systemctl restart homegear
-
+# Record completion NOW, while the root filesystem is still writable, and
+# crucially BEFORE first-starting Homegear. homegear-management remounts /
+# read-only as it comes up (its own read-only-appliance handling literally
+# runs `mount -o remount,rw /` ... `sync; mount -o remount,ro /`), so a
+# write to /etc after that point fails with EROFS - which is exactly how
+# this script used to die on its final touch. The install is fully defined
+# by the packages and config already in place here; the first start below
+# is a separate step and needs no writable root (Homegear's own data lives
+# on zram + /data).
 touch "$DONE_FILE"
 echo "==> Homegear installation complete."
+
+# Create database and defaultPassword.txt on first start.
+echo "==> Starting Homegear for the first time..."
+systemctl restart homegear
 
 logger -t rpi-firstboot-homegear "Homegear installed and configured"

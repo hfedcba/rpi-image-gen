@@ -11,7 +11,7 @@
 #  therefore conflicts with anything requiring systemd-timesyncd, e.g. the
 #  suite layer trixie-minbase - use trixie-minbase's constituent layers
 #  directly instead, omitting systemd-timesyncd; see the example configs.
-# X-Env-Layer-Version: 1.2.0
+# X-Env-Layer-Version: 1.3.0
 # X-Env-Layer-Provides: readonly-root
 # X-Env-Layer-Requires: device-user-admin,fake-hwclock,chrony,firstboot-assistant
 # X-Env-Layer-Conflicts: systemd-timesyncd
